@@ -54,11 +54,41 @@ typedef struct spreadsheet_t
 	}SpreadSheet,*SpreadSheetPtr;
 
 
+/**
+ * Operator
+ */
+typedef struct operator_t
+	{
+	char name[100];
+	size_t num_children;
+	floating_t (*eval)(floating_t* );
+	int weight;
+	size_t index;
+	} Operator,*OperatorPtr;
+
+
+/**
+ * OperatorList
+ */
+typedef struct operator_list_t
+	{
+	Operator** operators;
+	size_t size;
+	int total_weight;
+	/* below, shortcuts to operator to create silent mutations e.g x/1.0 ; x*1.0   x+0.0; y-0.0 */
+	OperatorPtr plus;
+	OperatorPtr minus;
+	OperatorPtr div;
+	OperatorPtr mul;
+	} OperatorList,*OperatorListPtr;
+
+
 
 /** Configuration */
 typedef struct config_t
 	{
 	SpreadSheetPtr spreadsheet;
+	OperatorListPtr operators;
 	long max_generations;
 	long curr_generations;
 	int min_genomes_per_generation;
@@ -73,9 +103,15 @@ typedef struct config_t
 	float probability_mutation;
 	boolean_t remove_introns;
 	boolean_t best_will_survive;
+	boolean_t enable_self_self;
+	boolean_t normalize_data;
+	long massive_extinction_every;
+	boolean_t sort_on_genome_size;
+	boolean_t remove_clone;
 	} Config,*ConfigPtr;
 	
 #define RANDOM_FLOAT(cfg) ((double)rand_r(&(cfg->seedp))/(double)RAND_MAX)
+#define RANDOM_SIZE_T(cfg,LEN)  (rand_r(&(cfg->seedp))% (LEN) )
 
 /** Node */
 typedef struct node_t
@@ -90,15 +126,8 @@ typedef struct node_t
 	} Node,*NodePtr;	
 	
 
-/**
- * Operator
- */
-typedef struct operator_t
-	{
-	char name[100];
-	size_t num_children;
-	floating_t (*eval)(floating_t* );
-	} Operator,*OperatorPtr;
+
+
 
 
 /**
@@ -106,8 +135,8 @@ typedef struct operator_t
  */
 typedef struct genome_t
 	{
-	/** associated spreadsheet */
-	SpreadSheetPtr spreadsheet;
+	/** associated config */
+	ConfigPtr config;
 	/** all nodes */
 	NodePtr nodes;
 	/* number of nodes */
@@ -147,8 +176,11 @@ GenomePtr GenomeNew1(ConfigPtr cfg);
 GenomePtr GenomeClone(const GenomePtr src);
 int GenomeCompare(const GenomePtr g1,const GenomePtr g2);
 void GenomePrint(const GenomePtr g,FILE* out);
+void GenomeMute(GenomePtr cfg);
+boolean_t GenomeEquals(const GenomePtr g1,const GenomePtr g2);
 
-
-
+OperatorListPtr OperatorsListNew();
+OperatorPtr OperatorListAt(OperatorListPtr list,size_t index);
+size_t OperatorListSize(OperatorListPtr list);
 #endif
 

@@ -29,7 +29,7 @@ SOFTWARE.
 
 #define DEBUG(msg) do { fprintf(stderr,"[%d]DEBUG ",__LINE__); fputs(msg,stderr);fputc('\n',stderr); } while(0)
 #define THROW_ERROR(a) do {fputs(a,stderr);fputc('\n',stderr);assert(0);} while(0)
-#define MAX_OPERATORS_COUNT 5
+
 
 
 static const size_t NPOS=(size_t)-1UL;
@@ -39,48 +39,75 @@ floating_t SpreadSheetAt(const SpreadSheetPtr ptr,size_t y,size_t x)
 	{
 	if( y >= SpreadSheetRows(ptr) )
 		{
-		fprintf(stderr,"Y=%d >= cols=(%d)\n",y, SpreadSheetRows(ptr) );
-		THROW_ERROR("y>cols");
+		fprintf(stderr,"Y=%d >= rows=(%d)\n",y, SpreadSheetRows(ptr) );
+		THROW_ERROR("y>rows");
 		}
-	if( x >= SpreadSheetColumns(ptr) ) THROW_ERROR("x>=rows");
+	if( x >= SpreadSheetColumns(ptr) )
+		{
+		fprintf(stderr,"X=%d >= cols=(%d)\n",x, SpreadSheetColumns(ptr) );
+		THROW_ERROR("x>=col");
+		}
 	return ptr->data[ y*SpreadSheetColumns(ptr) + x];
 	}
 
 
 
 
+static void NodeInitConstant(ConfigPtr cfg,NodePtr op)
+	{
+	op->type = CONSTANT;
+	if(RANDOM_FLOAT(cfg)<0.5)
+		{
+		op->core.constant = RANDOM_FLOAT(cfg);
+		}
+	else
+		{
+		op->core.constant = (double)rand_r(&(cfg->seedp));
+		}
+	if(RANDOM_FLOAT(cfg)<0.5) op->core.constant *=-1;
+	}
+	
+static void NodeInitColumn(ConfigPtr cfg,NodePtr op)
+	{
+	op->type = OPERATOR;
+	op->core.operator= RANDOM_SIZE_T(cfg, OperatorListSize(cfg->operators) );
+	}
+	
+static void NodeInitOperator(ConfigPtr cfg,NodePtr op)
+	{
+	op->type = COLUMN;
+	op->core.column = RANDOM_SIZE_T(cfg, SpreadSheetColumns(cfg->spreadsheet)-1);
 
+	}
 
+static void NodeMut(ConfigPtr cfg,NodePtr op)
+	{
+	switch(op->type)
+		{
+		case CONSTANT: NodeInitConstant(cfg,op);break;
+		case OPERATOR : NodeInitOperator(cfg,op);break;
+		case COLUMN: NodeInitColumn(cfg,op);break;
+		default: THROW_ERROR("BOUM");
+		}
+	}
 
 static void NodeInit(ConfigPtr cfg,NodePtr op)
 	{
 	float r= RANDOM_FLOAT(cfg);
 
-	int weight = rand_r(&(cfg->seedp)) %
-		cfg->weight_constant + cfg->weight_column + cfg->weight_op
-		;
+	//int weight = rand_r(&(cfg->seedp)) % cfg->weight_constant + cfg->weight_column + cfg->weight_op ;
+	
 	if( r < 0.333f)
 		{
-		op->type = CONSTANT;
-		if(RANDOM_FLOAT(cfg)<0.5)
-			{
-			op->core.constant = RANDOM_FLOAT(cfg);
-			}
-		else
-			{
-			op->core.constant = (double)rand_r(&(cfg->seedp));
-			}
-		if(RANDOM_FLOAT(cfg)<0.5) op->core.constant *=-1;
+		NodeInitConstant(cfg,op);
 		}
 	else if(  r < 0.666f)
 		{
-		op->type = OPERATOR;
-		op->core.operator=  rand_r(&(cfg->seedp)) % MAX_OPERATORS_COUNT ;
+		NodeInitOperator(cfg,op);
 		}
 	else
 		{
-		op->type = COLUMN;
-		op->core.column = rand_r(&(cfg->seedp)) % (SpreadSheetColumns(cfg->spreadsheet)-1);
+		NodeInitColumn(cfg,op);
 		}
 
 	}
@@ -90,7 +117,7 @@ GenomePtr GenomeNew1(ConfigPtr cfg)
 	GenomePtr g=(GenomePtr)calloc(1,sizeof(Genome));
 	if(g==NULL) THROW_ERROR("boum");
 
-	g->spreadsheet = cfg->spreadsheet;
+	g->config = cfg;
 	g->node_count = 0;
 	g->nodes = NULL;
 	g->bad_flag=0;
@@ -103,7 +130,7 @@ GenomePtr GenomeClone(const GenomePtr src)
 	{
 	GenomePtr g=(GenomePtr)calloc(1,sizeof(Genome));
 	if(g==NULL) THROW_ERROR("boum");
-	g->spreadsheet = src->spreadsheet;
+	g->config = src->config;
 	g->node_count = src->node_count;
 	g->nodes = (NodePtr)calloc(src->node_count,sizeof(Node));
 	if(g->nodes==NULL) THROW_ERROR("boum");
@@ -134,9 +161,8 @@ GenomePtr GenomeNew(ConfigPtr cfg)
 	GenomePtr g = GenomeNew1(cfg);
 
 	g->node_count = cfg->min_base_per_genome +
-		rand_r(&(cfg->seedp)) %
-			abs(cfg->max_base_per_genome - cfg->min_base_per_genome)
-			;
+		RANDOM_SIZE_T(cfg, abs(cfg->max_base_per_genome - cfg->min_base_per_genome)) ;
+		
 	g->nodes = (NodePtr)calloc(g->node_count,sizeof(Node));
 	if(g->nodes==NULL) THROW_ERROR("boum");
 	for(i=0;i <  GenomeSize(g) ; ++i)
@@ -158,15 +184,26 @@ int GenomeCompare(const GenomePtr g1,const GenomePtr g2)
 	{
 	if(g1 -> bad_flag)
 		{
-		if(g2->bad_flag) return 0;
+		if(g2->bad_flag)
+			{
+			if( g1->config->sort_on_genome_size)
+				{
+				if(g1->node_count < g2->node_count) return -1;
+				if(g1->node_count > g2->node_count) return 1;
+				}
+			return 0;
+			}
 		return 1;
 		}
 	if(g2->bad_flag ) return -1;
 	if( g1->fitness < g2->fitness) return -1;
 	if( g1->fitness > g2->fitness) return 1;
 	
-	if(g1->node_count < g2->node_count) return -1;
-	if(g1->node_count > g2->node_count) return 1;
+	if( g1->config->sort_on_genome_size)
+		{
+		if(g1->node_count < g2->node_count) return -1;
+		if(g1->node_count > g2->node_count) return 1;
+		}
 	return 0;
 	}
 static int _GenomeCompare(const void* a,const void* b)
@@ -205,8 +242,7 @@ static GenerationPtr GenerationNew(ConfigPtr cfg)
 	GenerationPtr g = GenerationNew1(cfg); 
 	g->genome_count =
 		cfg->min_genomes_per_generation +
-		rand_r(&(cfg->seedp)) %
-		abs( cfg->max_genomes_per_generation - cfg->min_genomes_per_generation )
+		RANDOM_SIZE_T(cfg, abs( cfg->max_genomes_per_generation - cfg->min_genomes_per_generation ))
 		;
 	g->genomes=(Genome**)calloc(g->genome_count,sizeof(Genome*));
 	if(g->genomes==NULL) THROW_ERROR("boum");
@@ -245,66 +281,105 @@ static void GenerationFree(GenerationPtr g)
 
 
 
-#define MAX_SHUTTLES 2
+#define MAX_ARITY 2
 
 static floating_t _plus(floating_t* array) { return array[0] + array[1];}
 static floating_t _minus(floating_t* array) { return array[0] - array[1];}
 static floating_t _mul(floating_t* array) { return array[0] * array[1];}
 static floating_t _div(floating_t* array) { return array[1]==0?NAN:array[0]/array[1];}
 static floating_t _sqrt(floating_t* array) { return array[0]<=0?NAN:sqrt(array[0]);}
+static floating_t _negate(floating_t* array) { return  - array[0];}
+static floating_t _invert(floating_t* array) { return array[0]==0?NAN:1.0/array[0];}
 
-Operator** ALL_OPERATORS = NULL;
+#define NEW_OPERATOR (OperatorPtr)(OperatorPtr)calloc(1,sizeof(Operator));\
+	if(op==NULL) THROW_ERROR("BOUM");\
+	ALL_OPERATORS->operators = (Operator**)realloc(ALL_OPERATORS->operators,sizeof(OperatorPtr)*(ALL_OPERATORS->size+1));\
+	if(ALL_OPERATORS->operators==NULL) THROW_ERROR("BOUM");\
+	ALL_OPERATORS->operators[ALL_OPERATORS->size]=op;\
+	op->index = ALL_OPERATORS->size;\
+	ALL_OPERATORS->size++
+	
 
-static void OperatorBuildList()
+OperatorListPtr OperatorsListNew()
 	{
+
 	OperatorPtr op=NULL;
-	ALL_OPERATORS=(OperatorPtr*)calloc(MAX_OPERATORS_COUNT,sizeof(OperatorPtr));
+	OperatorListPtr ALL_OPERATORS=(OperatorListPtr)calloc(1,sizeof(OperatorList));
+	if(ALL_OPERATORS==NULL) THROW_ERROR("");
 	
 	/** PLUS **/
-	op = (OperatorPtr)calloc(1,sizeof(Operator));
-	if(op==NULL) THROW_ERROR("");
+	op =NEW_OPERATOR;
 	strcpy(op->name,"Add");
 	op->num_children = 2UL;
 	op->eval = _plus;
-	ALL_OPERATORS[0]=op;
+	ALL_OPERATORS->plus=op;
+
 	
 	/** MINUS **/
-	op = (OperatorPtr)calloc(1,sizeof(Operator));
-	if(op==NULL) THROW_ERROR("");
-	strcpy(op->name,"Plus");
+	op = NEW_OPERATOR;
+	strcpy(op->name,"Minus");
 	op->num_children = 2UL;
 	op->eval = _minus;
-	ALL_OPERATORS[1]=op;
+	ALL_OPERATORS->minus=op;
+
 	
 	/** MUL **/
-	op = (OperatorPtr)calloc(1,sizeof(Operator));
-	if(op==NULL) THROW_ERROR("");
-	strcpy(op->name,"Plus");
+	op = NEW_OPERATOR;
+	strcpy(op->name,"Mul");
 	op->num_children = 2UL;
 	op->eval = _mul;
-	ALL_OPERATORS[2]=op;
+	ALL_OPERATORS->mul=op;
+
 	
 	/** DIV **/
-	op = (OperatorPtr)calloc(1,sizeof(Operator));
-	if(op==NULL) THROW_ERROR("");
+	op = NEW_OPERATOR;
 	strcpy(op->name,"Div");
 	op->num_children = 2UL;
 	op->eval = _div;
-	ALL_OPERATORS[3]=op;
+	ALL_OPERATORS->div=op;
+	
+	
+	/** Negate **/
+	op = NEW_OPERATOR;
+	strcpy(op->name,"Negate");
+	op->num_children = 1UL;
+	op->eval = _negate;
+
+	/** Invert **/
+	op = NEW_OPERATOR;
+	strcpy(op->name,"Invert");
+	op->num_children = 1UL;
+	op->eval = _invert;
+
 	
 	/** SQRT **/
-	op = (OperatorPtr)calloc(1,sizeof(Operator));
-	if(op==NULL) THROW_ERROR("");
+	/*
+	op =NEW_OPERATOR;
 	strcpy(op->name,"Sqrt");
 	op->num_children = 1UL;
 	op->eval = _sqrt;
-	ALL_OPERATORS[4]=op;
-	
+	*/
+
+	return ALL_OPERATORS;
 	} 
+
+OperatorPtr OperatorListAt(OperatorListPtr list,size_t index)
+	{
+	if(index>=OperatorListSize(list))
+		{
+		fprintf(stderr,"%d >= %d\n",	index, OperatorListSize(list));
+		THROW_ERROR("BOUM");
+		}
+	return list->operators[index];
+	}
+
+size_t OperatorListSize(OperatorListPtr list)
+	{
+	return list->size;
+	}
 
 
 static void GenomeEval1(
-		ConfigPtr config,
 		const GenomePtr genome,
 		const size_t rowIndex,
 	 	size_t *nodeIndex,
@@ -316,7 +391,6 @@ static void GenomeEval1(
 	if( *error ) return;
 	if( *nodeIndex >= GenomeSize(genome))
 		{
-		//fprintf(stderr,"#####Error\n");
 		*error = 1;
 		return;
 		}
@@ -332,7 +406,7 @@ static void GenomeEval1(
 		case COLUMN:
 			{
 			*value = SpreadSheetAt(
-				genome->spreadsheet,
+				genome->config->spreadsheet,
 				rowIndex,
 				node->core.column
 				);
@@ -342,8 +416,8 @@ static void GenomeEval1(
 		case OPERATOR:
 			{
 			size_t i;
-			floating_t values[MAX_SHUTTLES];
-			OperatorPtr op = ALL_OPERATORS[node->core.operator];
+			floating_t values[MAX_ARITY];
+			OperatorPtr op = OperatorListAt(genome->config->operators,node->core.operator);
 			
 			//fprintf(stderr,"Operator = %s \n",op->name);
 			
@@ -351,7 +425,6 @@ static void GenomeEval1(
 				{
 				*nodeIndex=*nodeIndex + 1;
 				GenomeEval1(
-					config,
 					genome,
 					rowIndex,
 					nodeIndex,
@@ -412,7 +485,7 @@ void _GenomePrint(const GenomePtr g,size_t *nodeIndex,FILE* out)
 		case OPERATOR:
 			{
 			size_t i;
-			OperatorPtr op = ALL_OPERATORS[node->core.operator];
+			OperatorPtr op = OperatorListAt(g->config->operators, node->core.operator);
 			fprintf(out,"%s(", op->name);
 			
 			for(i=0;i< op->num_children;++i)
@@ -433,28 +506,38 @@ void _GenomePrint(const GenomePtr g,size_t *nodeIndex,FILE* out)
 void GenomePrint(const GenomePtr g,FILE* out)
 	{
 	size_t node_index=0;
-	fprintf(stderr,"FITNESS %f GEN=%ld (",g->fitness,g->generation);
+	fprintf(stderr,"FITNESS=%E\tGENERATION=%ld\t(",g->fitness,g->generation);
 	_GenomePrint(g,&node_index,out);
 	fputs(");\n",out);
 	}
 
+boolean_t GenomeEquals(const GenomePtr g1,const GenomePtr g2)
+	{
+	if(g1==g2) return 1;
+	if(g1->node_count != g2->node_count ) return 0;
+	return memcmp(
+		(const void*)g1->nodes,
+		(const void*)g2->nodes,
+		g2->node_count*sizeof(Node)
+		)==0;
+	}
 
 
-static void GenomeEval(ConfigPtr config,GenomePtr g)
+static void GenomeEval(GenomePtr g)
 	{
 	
 	floating_t min_value= DBL_MAX;
 	floating_t max_value=-DBL_MAX;
 	size_t rowIndex;
 	size_t num_errors=0UL;
-	size_t max_errors=(size_t)(config->max_fraction_of_errors)*SpreadSheetRows(g->spreadsheet);
-	floating_t  *norms=(floating_t*)calloc(SpreadSheetRows(g->spreadsheet),sizeof(floating_t));
+	size_t max_errors=(size_t)(g->config->max_fraction_of_errors)*SpreadSheetRows(g->config->spreadsheet);
+	floating_t  *norms=(floating_t*)calloc(SpreadSheetRows(g->config->spreadsheet),sizeof(floating_t));
 	if(norms==NULL) THROW_ERROR("BOUM");
 	
-	if( SpreadSheetRows(g->spreadsheet)==0) THROW_ERROR("BOUM");
+	if( SpreadSheetRows(g->config->spreadsheet)==0) THROW_ERROR("BOUM");
 	
 	for(rowIndex=0;
-		rowIndex< SpreadSheetRows(g->spreadsheet);
+		rowIndex< SpreadSheetRows(g->config->spreadsheet);
 		++rowIndex)
 		{
 		size_t nodeIndex=0;
@@ -462,7 +545,7 @@ static void GenomeEval(ConfigPtr config,GenomePtr g)
 		boolean_t  error=0;
 		
 		
-		GenomeEval1(config,g,rowIndex,&nodeIndex,&value,&error);
+		GenomeEval1(g,rowIndex,&nodeIndex,&value,&error);
 		if(error)
 			{
 			num_errors++;
@@ -474,7 +557,7 @@ static void GenomeEval(ConfigPtr config,GenomePtr g)
 				}
 			continue;
 			}
-		if( config->remove_introns )
+		if( g->config->remove_introns )
 			{
 			g->node_count=1+nodeIndex;
 			}
@@ -493,13 +576,21 @@ static void GenomeEval(ConfigPtr config,GenomePtr g)
 		{
 		g->fitness=0.0;
 		for(rowIndex=0;
-			rowIndex< SpreadSheetRows(g->spreadsheet);
+			rowIndex< SpreadSheetRows(g->config->spreadsheet);
 			++rowIndex)
 			{
+			double diff=0.0;
 			if( isnan(norms[rowIndex]) ) continue;
-			norms[rowIndex]=(norms[rowIndex]-min_value)/(max_value-min_value);
-			g->fitness += fabs( norms[rowIndex] - g->spreadsheet->normalized[rowIndex] );
-			
+			if(g->config->normalize_data)
+				{
+				norms[rowIndex]=(norms[rowIndex]-min_value)/(max_value-min_value);
+				diff = fabs( norms[rowIndex] - g->config->spreadsheet->normalized[rowIndex] );
+				}
+			else
+				{
+				diff = fabs( norms[rowIndex] - SpreadSheetAt(g->config->spreadsheet,rowIndex,SpreadSheetColumns(g->config->spreadsheet)-1) );
+				}
+			g->fitness += pow(diff,2);
 			}
 		//fprintf(stderr,"fitness =%f\n",g->fitness);
 		}
@@ -606,63 +697,160 @@ SpreadSheetPtr SpreadSheetRead(FILE* in)
 	return p;
 	}
 
+void GenomeMute(GenomePtr g)
+	{
+	size_t i;
+	ConfigPtr cfg=g->config;
+	
+	while(  GenomeSize(g) >0 &&
+		RANDOM_FLOAT(cfg) < cfg->probability_mutation)
+		{
+		i= RANDOM_SIZE_T(cfg,g->node_count);
+		
+		float rnd= RANDOM_FLOAT(cfg);
+		if( rnd < 0.05 )
+			{
+			//insert
+			size_t j,insert_size= 1 + RANDOM_SIZE_T( cfg , 5); 
+			g->nodes = (NodePtr)realloc(g->nodes, (g->node_count + insert_size)*sizeof(Node));
+			if(g->nodes==NULL) THROW_ERROR("boum");
+			memmove(
+				(void*)&g->nodes[i+insert_size],//dest
+				(void*)&g->nodes[i],//src
+				(GenomeSize(g) - i)*sizeof(Node)
+				);
+			for(j=0;j< insert_size;++j)
+				{
+				NodeInit(cfg,&(g->nodes[i+j]));
+				}
+			g->node_count+=insert_size;
+			}
+		else if(rnd< 0.1)
+			{
+			//delete
+			size_t del_size= 1 + RANDOM_SIZE_T( cfg , 5); 
+			if( i+del_size > GenomeSize(g))
+				{
+				del_size = GenomeSize(g) - i;
+				}
+				
+			memmove(
+				(void*)&g->nodes[i],//dest
+				(void*)&g->nodes[i+del_size],//src
+				(GenomeSize(g) - (i+del_size))*sizeof(Node)
+				);
+				
+			g->node_count -= del_size;
+				
+			}
+		else if(rnd < 0.2 && rnd>10 )
+			{
+			//silent mutation
+			size_t insert_size=2; 
+			g->nodes = (NodePtr)realloc(g->nodes, (g->node_count + insert_size)*sizeof(Node));
+			if(g->nodes==NULL) THROW_ERROR("boum");
+			g->node_count+=insert_size;
+			
+			memcpy(
+				(void*)&g->nodes[i+1+insert_size],//dest
+				(void*)&g->nodes[i+1],//src
+				(GenomeSize(g) - (i+1))*sizeof(Node)
+				);
+			memcpy(
+				(void*)&g->nodes[i+1],//dest
+				(void*)&g->nodes[i],//src
+				sizeof(Node)
+				);
+			memcpy(
+				(void*)&g->nodes[i+2],//dest
+				(void*)&g->nodes[i],//src
+				sizeof(Node)
+				);
+				
+			
+			switch(  RANDOM_SIZE_T( cfg , 4) )
+				{
+				case 0: {
+					g->nodes[i].type=OPERATOR;
+					g->nodes[i].core.operator= cfg->operators->plus->index;
+					
+					g->nodes[i+2].type=CONSTANT;
+					g->nodes[i+2].core.constant= 0.0;
+					break;
+					};
+				case 1: {
+					g->nodes[i].type=OPERATOR;
+					g->nodes[i].core.operator= cfg->operators->minus->index;
+					
+					g->nodes[i+2].type=CONSTANT;
+					g->nodes[i+2].core.constant= 0.0;
+					break;
+					};
+				case 2: {
+					g->nodes[i].type=OPERATOR;
+					g->nodes[i].core.operator= cfg->operators->mul->index;
+					
+					g->nodes[i+2].type=CONSTANT;
+					g->nodes[i+2].core.constant= 1.0;
+					break;
+					};
+				default:
+					{
+					
+					g->nodes[i].type=OPERATOR;
+					g->nodes[i].core.operator= cfg->operators->mul->index;
+					
+					g->nodes[i+2].type=CONSTANT;
+					g->nodes[i+2].core.constant= 1.0;
+					
+					break;
+					}
+				}
+			fprintf(stderr," op index : %d\n",g->nodes[i].core.operator);
+			
+			}
+		else if( rnd < 0.3)
+			{
+			NodeInit(cfg,&(g->nodes[i]));
+			}
+		else
+			{
+			NodeMut(cfg,&(g->nodes[i]));
+			}
+		}
+	}
+
 static GenomePtr GenomeXCross(
 	ConfigPtr cfg,
 	GenomePtr p1,
 	GenomePtr p2
 	)
 	{
-	size_t i;
 	GenomePtr g = GenomeNew1(cfg);
-	size_t xcross1 = rand_r(&(cfg->seedp)) % MIN( GenomeSize(p1), GenomeSize(p2) );
+	size_t xcross1;
+	size_t xcross2;
 	
-	g->node_count=  xcross1 + (GenomeSize(p2)-xcross1);
+	if(RANDOM_FLOAT(cfg)<0.1)
+		{
+		xcross1 = RANDOM_SIZE_T(cfg,GenomeSize(p1));
+		xcross2 = RANDOM_SIZE_T(cfg,GenomeSize(p2));
+		}
+	else
+		{
+		xcross1 = RANDOM_SIZE_T(cfg, MIN( GenomeSize(p1), GenomeSize(p2) ));
+		xcross2 = xcross1;
+		}
+	
+	
+	g->node_count=  xcross1 + (GenomeSize(p2)-xcross2);
 	
 	
 	g->nodes = (NodePtr)calloc(g->node_count,sizeof(Node));
 	if(g->nodes==NULL) THROW_ERROR("boum");
 	memcpy((void*)g->nodes,(void*)p1->nodes,xcross1*sizeof(Node));
-	memcpy((void*)&g->nodes[xcross1],(void*)&(p2->nodes[xcross1]),(GenomeSize(p2)-xcross1)*sizeof(Node));
+	memcpy((void*)&g->nodes[xcross1],(void*)&(p2->nodes[xcross2]),(GenomeSize(p2)-xcross2)*sizeof(Node));
 	
-	
-	
-	if(  GenomeSize(g) >0 &&
-		RANDOM_FLOAT(cfg) < cfg->probability_mutation)
-		{
-		i= rand_r(&(cfg->seedp)) % g->node_count;
-		
-		float rnd= RANDOM_FLOAT(cfg);
-		if( rnd < 0.05 )
-			{
-			//insert
-			g->nodes = (NodePtr)realloc(g->nodes, (g->node_count+1)*sizeof(Node));
-			if(g->nodes==NULL) THROW_ERROR("boum");
-			memmove(
-				(void*)&g->nodes[i+1],
-				(void*)&g->nodes[i],
-				(GenomeSize(g) - i)*sizeof(Node)
-				);
-			NodeInit(cfg,&(g->nodes[i]));
-			g->node_count++;
-			}
-		else if(rnd< 0.1)
-			{
-			//delete
-			
-			memmove(
-				(void*)&g->nodes[i],
-				(void*)&g->nodes[i+1],
-				(GenomeSize(g) - (i+1))*sizeof(Node)
-				);
-				
-			g->node_count--;
-			}
-		else
-			{
-			NodeInit(cfg,&(g->nodes[i]));
-			}
-		}
-	
+	GenomeMute(g);
 	return g;
 	}
 
@@ -680,13 +868,16 @@ static void doWork(ConfigPtr config)
 		GenerationPtr gen1= GenerationNew1(config);
 		GenerationPtr tmp = NULL;
 		
-		for(i=0;i< 5;++i)
+		while( GenerationCount(gen) < config->max_genomes_per_generation )
 			{
 			GenerationAdd(gen,GenomeNew(config));
 			}
+		
 		if(best!=NULL && config->best_will_survive)
 			{
-			GenerationAdd(gen,GenomeClone(best));
+			GenomePtr copy=GenomeClone(best);
+			GenomeMute(copy);
+			GenerationAdd(gen,copy);
 			}
 		
 		for(i=0 ; i < GenerationCount(gen) ; ++i)
@@ -696,18 +887,21 @@ static void doWork(ConfigPtr config)
 				{
 				GenomePtr newgen=NULL;
 				GenomePtr gj=GenerationAt(gen,j);
-				if( i == j) continue;
+				if( i == j && !config->enable_self_self) continue;
+				
 				newgen =  GenomeXCross(config,gi,gj);
+				
 				if(newgen==NULL ||
 					GenomeSize(newgen)==0 ||
 					GenomeSize(newgen) < config->min_base_per_genome ||
-					GenomeSize(newgen) > config->max_base_per_genome
+					GenomeSize(newgen) > config->max_base_per_genome ||
+					(config->remove_clone && (GenomeEquals(newgen,gi) || GenomeEquals(newgen,gj)) )
 					)
 					{
 					GenomeFree(newgen);
 					continue;
 					}
-				GenomeEval(config,newgen);
+				GenomeEval(newgen);
 				if( newgen->bad_flag )
 					{
 					GenomeFree(newgen);
@@ -730,17 +924,40 @@ static void doWork(ConfigPtr config)
 			_GenomeCompare
 			);	
 		
-		while( GenerationCount(gen1) > config->min_genomes_per_generation )
+		/* remove duplicate children */
+		i=0;
+		while(i+1< GenerationCount(gen1))
+			{
+			if( GenomeEquals(GenerationAt(gen1,i),GenerationAt(gen1,i+1) ))
+				{
+				GenomeFree( GenerationAt(gen1,i) );
+				memmove(
+					(void*)&gen1->genomes[i],
+					(const void*)&gen1->genomes[i+1],
+					sizeof(GenomePtr)*(GenerationCount(gen1)-(i+1))
+					);
+				gen1->genome_count--;
+				}
+			else
+				{
+				++i;
+				}
+			}
+				
+		while( GenerationCount(gen1) > config->min_genomes_per_generation ||
+			(config->massive_extinction_every!=-1L && config->curr_generations % config->massive_extinction_every==0 &&  GenerationCount(gen1) >0 ))
 			{
 			GenomeFree( gen1->genomes[ GenerationCount(gen1) -1 ] );
 			gen1->genome_count--;
 			}
 		
 
+
 		
 		
 		if(GenerationCount(gen1)>0 && !(GenerationAt(gen1,0)->bad_flag) )
 			{
+			//GenomePrint(GenerationAt(gen1,0),stderr);
 			if(best==NULL || best->fitness > GenerationAt(gen1,0)->fitness)
 				{
 				GenomeFree(best);
@@ -748,6 +965,10 @@ static void doWork(ConfigPtr config)
 
 				GenomePrint(best,stderr);
 				}
+			}
+		else
+			{
+			fprintf(stderr,"too many errors\n");
 			}
 		tmp = gen;
 		gen = gen1;
@@ -763,9 +984,9 @@ int main(int argc,char** argv)
 	memset((void*)&config,0,sizeof(Config));
 	config.max_generations = -1L;
 	config.min_genomes_per_generation=10;
-	config.max_genomes_per_generation=20;
+	config.max_genomes_per_generation=200;
 	config.min_base_per_genome=3;
-	config.max_base_per_genome=200;
+	config.max_base_per_genome=30;
 	
 	config.probability_mutation=0.01;
 	config.max_fraction_of_errors=0.1f;
@@ -773,16 +994,21 @@ int main(int argc,char** argv)
 	config.weight_op=10;
 	config.weight_column=10;
 	
-	config.remove_introns=1;
-	config.best_will_survive=1;
+	config.remove_introns=0;
+	config.best_will_survive=0;
+	config.enable_self_self=0;
+	config.normalize_data=0;
+	config.massive_extinction_every= -1L;
+	config.sort_on_genome_size=0;
+	config.remove_clone=0;
 	
-	OperatorBuildList();
-	
+	config.operators = OperatorsListNew();
+	config.seedp=(int)time(NULL);
 	srand(time(NULL));
 	
 	for(;;)
 		{
-		 static struct option long_options[] =
+		struct option long_options[] =
 		     {
 		       /* These options set a flag. */
 		       //{"verbose", no_argument,       &verbose_flag, 1},
@@ -793,13 +1019,21 @@ int main(int argc,char** argv)
 		       //{"append",  no_argument,       0, 'b'},
 		       //{"delete",  required_argument, 0, 'd'},
 		       //{"create",  required_argument, 0, 'c'},
+		       {"enable-self-self",  no_argument , &config.enable_self_self , 1},
+		       {"enable-best-survives",  no_argument , &config.best_will_survive , 1},
+		       {"enable-remove-introns",  no_argument , &config.remove_introns , 1},
+		       {"remove-clone",  no_argument , &config.remove_clone , 1},
+		       {"genome-size-matters",  no_argument , &config.sort_on_genome_size , 1},
+		       {"normalize-data",  no_argument , &config.normalize_data , 1},
 		       {"generations",    required_argument, 0, 'g'},
 		       {"random-seed",    required_argument, 0, 's'},
+		       {"min-bases",    required_argument, 0, 'b'},
+		       {"max-bases",    required_argument, 0, 'B'},
 		       {0, 0, 0, 0}
 		     };
 		 /* getopt_long stores the option index here. */
 		int option_index = 0;
-	     	int c = getopt_long (argc, argv, "g:s:",
+	     	int c = getopt_long (argc, argv, "g:s:b:B:",
 		                    long_options, &option_index);
 		if(c==-1) break;
 		switch(c)
@@ -814,11 +1048,28 @@ int main(int argc,char** argv)
 				config.max_generations=atol(optarg);
 				break;
 				};
+			case 'b':
+				{
+				config.min_base_per_genome=strtoul(optarg,NULL,10);
+				break;
+				};
+			case 'B':
+				{
+				config.max_base_per_genome=strtoul(optarg,NULL,10);
+				break;
+				};
 			case 0: break;
 			case '?': break;
 			default: exit(EXIT_FAILURE); break;
 			}
 		}
+	
+	if( config.max_base_per_genome < config.min_base_per_genome)
+		{
+		fprintf(stderr," config.max_base_per_genome < config.min_base_per_genome\n");
+		return EXIT_FAILURE;
+		}
+	
 	if(optind==argc)
 		{
 		config.spreadsheet=SpreadSheetRead(stdin);
