@@ -5,14 +5,17 @@ Genetic programming implementation in C
 
 Author: Pierre Lindenbaum PhD @yokofakun
 
+
+From **Wikipedia** : https://en.wikipedia.org/wiki/Genetic_programming
+
 > In artificial intelligence, genetic programming (GP) is an evolutionary algorithm-based methodology inspired by biological evolution to find computer programs that perform a user-defined task.
 > Essentially GP is a set of instructions and a fitness function to measure how well a computer has performed a task.
 
-See https://en.wikipedia.org/wiki/Genetic_programming
+
 
 ## Compilation
 
-```
+```bash
 $ make
 ```
 
@@ -32,7 +35,6 @@ $ genprog [options] (stdin|file)
 
 ### Example:
 ```tsv
-$ head test.tsv 
 0.066221	0.984740	0.526733	-3.098112
 0.804358	0.838329	0.799516	-0.042361
 0.457574	0.442436	0.014716	0.064105
@@ -51,13 +53,21 @@ TODO
 
 ## Example
 
+Generate data for the function : `y= 2 * ( ( A - B ) / (A + C ) )` 
 
 ```bash
 tr "\0" "\n" < /dev/zero | head -n 3000 | awk '{printf("%f\n",rand());}' |\
 	paste - - - | awk '{printf("%s\t%s\t%s\t%f\n",$1,$2,$3,2.0 *(($1 - $2) /($1 + $3)));}' > test.tsv
+```
+
+invoke **genprog** :
+
+```bash
 ./genprog --min-bases 3 --max-bases 20 --min-genomes 3 --max-genomes 50 test.tsv
 ```
-output
+
+output:
+
 ```
 FITNESS=2.078584E+03	GENERATION=0	SECONDS=0	(Add(-0.599715,${1}));
 FITNESS=1.927753E+03	GENERATION=1	SECONDS=0	(Minus(${1},Minus(Invert(0.544634),${1})));
