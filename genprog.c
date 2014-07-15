@@ -123,6 +123,7 @@ GenomePtr GenomeNew1(ConfigPtr cfg)
 	g->bad_flag=0;
 	g->fitness = NAN;
 	g->generation = -1L;
+	g->creation = time(NULL);
 	return g;
 	}
 
@@ -138,6 +139,7 @@ GenomePtr GenomeClone(const GenomePtr src)
 	g->bad_flag = src->bad_flag;
 	g->fitness = src->fitness;
 	g->generation = src ->generation;
+	g->creation = src->creation; 
 	return g;
 	}	
 	
@@ -506,7 +508,7 @@ void _GenomePrint(const GenomePtr g,size_t *nodeIndex,FILE* out)
 void GenomePrint(const GenomePtr g,FILE* out)
 	{
 	size_t node_index=0;
-	fprintf(stderr,"FITNESS=%E\tGENERATION=%ld\t(",g->fitness,g->generation);
+	fprintf(stderr,"FITNESS=%E\tGENERATION=%ld\tSECONDS=%d\t(",g->fitness,g->generation,(int)difftime(g->creation,g->config->startup));
 	_GenomePrint(g,&node_index,out);
 	fputs(");\n",out);
 	}
@@ -743,15 +745,15 @@ void GenomeMute(GenomePtr g)
 			g->node_count -= del_size;
 				
 			}
-		else if(rnd < 0.2 && rnd>10 )
+		else if(rnd < 0.2)
 			{
 			//silent mutation
 			size_t insert_size=2; 
 			g->nodes = (NodePtr)realloc(g->nodes, (g->node_count + insert_size)*sizeof(Node));
 			if(g->nodes==NULL) THROW_ERROR("boum");
-			g->node_count+=insert_size;
 			
-			memcpy(
+			
+			memmove(
 				(void*)&g->nodes[i+1+insert_size],//dest
 				(void*)&g->nodes[i+1],//src
 				(GenomeSize(g) - (i+1))*sizeof(Node)
@@ -766,7 +768,7 @@ void GenomeMute(GenomePtr g)
 				(void*)&g->nodes[i],//src
 				sizeof(Node)
 				);
-				
+			g->node_count+=insert_size;
 			
 			switch(  RANDOM_SIZE_T( cfg , 4) )
 				{
@@ -806,8 +808,6 @@ void GenomeMute(GenomePtr g)
 					break;
 					}
 				}
-			fprintf(stderr," op index : %d\n",g->nodes[i].core.operator);
-			
 			}
 		else if( rnd < 0.3)
 			{
@@ -963,7 +963,12 @@ static void doWork(ConfigPtr config)
 				GenomeFree(best);
 				best=GenomeClone( GenerationAt(gen1,0) );
 
-				GenomePrint(best,stderr);
+				GenomePrint(best,stdout);
+				if(best->fitness < config->min_fitness)
+					{
+					fprintf(stderr,"min fitness reached\n");
+					break;
+					}
 				}
 			}
 		else
@@ -983,8 +988,8 @@ int main(int argc,char** argv)
 	Config config;
 	memset((void*)&config,0,sizeof(Config));
 	config.max_generations = -1L;
-	config.min_genomes_per_generation=10;
-	config.max_genomes_per_generation=200;
+	config.min_genomes_per_generation=5;
+	config.max_genomes_per_generation=50;
 	config.min_base_per_genome=3;
 	config.max_base_per_genome=30;
 	
@@ -1002,6 +1007,8 @@ int main(int argc,char** argv)
 	config.sort_on_genome_size=0;
 	config.remove_clone=0;
 	
+	config.min_fitness = 1E-6;
+	config.startup=time(NULL);
 	config.operators = OperatorsListNew();
 	config.seedp=(int)time(NULL);
 	srand(time(NULL));
@@ -1022,18 +1029,21 @@ int main(int argc,char** argv)
 		       {"enable-self-self",  no_argument , &config.enable_self_self , 1},
 		       {"enable-best-survives",  no_argument , &config.best_will_survive , 1},
 		       {"enable-remove-introns",  no_argument , &config.remove_introns , 1},
-		       {"remove-clone",  no_argument , &config.remove_clone , 1},
+		       {"enable-remove-clone",  no_argument , &config.remove_clone , 1},
 		       {"genome-size-matters",  no_argument , &config.sort_on_genome_size , 1},
 		       {"normalize-data",  no_argument , &config.normalize_data , 1},
 		       {"generations",    required_argument, 0, 'g'},
 		       {"random-seed",    required_argument, 0, 's'},
 		       {"min-bases",    required_argument, 0, 'b'},
 		       {"max-bases",    required_argument, 0, 'B'},
+		       {"min-genomes",    required_argument, 0, 'n'},
+		       {"max-genomes",    required_argument, 0, 'N'},
+		     
 		       {0, 0, 0, 0}
 		     };
 		 /* getopt_long stores the option index here. */
 		int option_index = 0;
-	     	int c = getopt_long (argc, argv, "g:s:b:B:",
+	     	int c = getopt_long (argc, argv, "g:s:b:B:n:N:",
 		                    long_options, &option_index);
 		if(c==-1) break;
 		switch(c)
@@ -1058,6 +1068,16 @@ int main(int argc,char** argv)
 				config.max_base_per_genome=strtoul(optarg,NULL,10);
 				break;
 				};
+			case 'n':
+				{
+				config.min_genomes_per_generation=atoi(optarg);
+				break;
+				};
+			case 'N':
+				{
+				config.max_genomes_per_generation=atoi(optarg);
+				break;
+				};
 			case 0: break;
 			case '?': break;
 			default: exit(EXIT_FAILURE); break;
@@ -1067,6 +1087,18 @@ int main(int argc,char** argv)
 	if( config.max_base_per_genome < config.min_base_per_genome)
 		{
 		fprintf(stderr," config.max_base_per_genome < config.min_base_per_genome\n");
+		return EXIT_FAILURE;
+		}
+	
+	if( config.min_genomes_per_generation<1)
+		{
+		fprintf(stderr," bad  config.min_genomes_per_generation\n");
+		return EXIT_FAILURE;
+		}
+	
+	if( config.max_genomes_per_generation < config.min_genomes_per_generation)
+		{
+		fprintf(stderr," config.max_genomes_per_generation < config.min_genomes_per_generation\n");
 		return EXIT_FAILURE;
 		}
 	

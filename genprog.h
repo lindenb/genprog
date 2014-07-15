@@ -108,6 +108,8 @@ typedef struct config_t
 	long massive_extinction_every;
 	boolean_t sort_on_genome_size;
 	boolean_t remove_clone;
+	floating_t min_fitness;
+	time_t startup;
 	} Config,*ConfigPtr;
 	
 #define RANDOM_FLOAT(cfg) ((double)rand_r(&(cfg->seedp))/(double)RAND_MAX)
@@ -147,6 +149,8 @@ typedef struct genome_t
 	boolean_t bad_flag;
 	/** associated generation */
 	long  generation;
+	/** creation date */
+	time_t creation;
 	}Genome,*GenomePtr;
 
 /*
