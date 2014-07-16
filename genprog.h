@@ -106,10 +106,12 @@ typedef struct config_t
 	boolean_t enable_self_self;
 	boolean_t normalize_data;
 	long massive_extinction_every;
+	floating_t massive_extinction_if_fitness_gt;
 	boolean_t sort_on_genome_size;
 	boolean_t remove_clone;
 	floating_t min_fitness;
 	time_t startup;
+	char* output_filename;
 	} Config,*ConfigPtr;
 	
 #define RANDOM_FLOAT(cfg) ((double)rand_r(&(cfg->seedp))/(double)RAND_MAX)
@@ -182,6 +184,7 @@ int GenomeCompare(const GenomePtr g1,const GenomePtr g2);
 void GenomePrint(const GenomePtr g,FILE* out);
 void GenomeMute(GenomePtr cfg);
 boolean_t GenomeEquals(const GenomePtr g1,const GenomePtr g2);
+void GenomeSave(const GenomePtr ptr);
 
 OperatorListPtr OperatorsListNew();
 OperatorPtr OperatorListAt(OperatorListPtr list,size_t index);

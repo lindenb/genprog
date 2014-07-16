@@ -854,6 +854,116 @@ static GenomePtr GenomeXCross(
 	return g;
 	}
 
+
+static void GenomeToDot(const GenomePtr g,size_t* parent_index,size_t* nodeIndex,FILE* out)
+	{
+	size_t save_index=(*nodeIndex);
+	NodePtr node;
+	if(*nodeIndex>=GenomeSize(g)) return;
+	node = GenomeAt(g, *nodeIndex );
+	fprintf(out,"n%d[label=",*nodeIndex);
+	switch(node->type)
+		{
+		case CONSTANT:
+			{
+			fprintf(out,"\"%f\"];\n", node->core.constant);
+			break;
+			}
+		case COLUMN:
+			{
+			fprintf(out,"\"${%d}\"];\n", node->core.column + 1);
+			break;
+			}
+		case OPERATOR:
+			{
+			
+			size_t i;
+			OperatorPtr op = OperatorListAt(g->config->operators, node->core.operator);
+			fprintf(out,"\"%s\"];\n", op->name);
+			
+			for(i=0;i< op->num_children;++i)
+				{
+				*nodeIndex=*nodeIndex + 1;
+				GenomeToDot(g,&save_index,nodeIndex,out);
+				}
+			break;
+			}
+		default:break;
+		}
+
+	if(parent_index!=NULL)
+		{
+		fprintf(out,"n%d -> n%d ;\n",save_index,*parent_index);
+		}
+	}
+
+#define SAFE_FOPEN(ext) strcpy(fname,g->config->output_filename); \
+	strcat(fname,ext);\
+	out=fopen(fname,"w");\
+	if(out==NULL) { fprintf(stderr,"Cannot open \"%s\". (%s)\n",fname,strerror(errno)); exit(EXIT_FAILURE);}
+	
+void GenomeSave(const GenomePtr g)
+	{
+	size_t index=0UL,rowIndex;
+	FILE* out=NULL;
+	char* fname=NULL;
+	if(g->config->output_filename==NULL) return;
+	fname=(char*)calloc(strlen(g->config->output_filename)+20,sizeof(char));
+	SAFE_FOPEN(".dot");
+	fputs("digraph {\n",out);
+	GenomeToDot(g,NULL,&index,out);
+	fputs("}\n",out);
+	fflush(out);
+	fclose(out);
+	
+	SAFE_FOPEN(".tsv");
+	for(rowIndex=0;
+		rowIndex< SpreadSheetRows(g->config->spreadsheet);
+		++rowIndex)
+		{
+		size_t i;
+		size_t nodeIndex=0;
+		floating_t  value=0.0;
+		boolean_t  error=0;
+		for(i=0;i< SpreadSheetColumns(g->config->spreadsheet);++i)
+			{
+			fprintf(out,"%E\t",SpreadSheetAt(g->config->spreadsheet,rowIndex,i));
+			}
+		GenomeEval1(g,rowIndex,&nodeIndex,&value,&error);
+		if(error)
+			{
+			fputs("NA",out);
+			}
+		else
+			{
+			fprintf(out,"%E",value);
+			}
+		fputs("\n",out);
+		}
+	fflush(out);
+	fclose(out);
+
+	SAFE_FOPEN(".R");
+	fprintf(out,"T<-read.table(\"%s.tsv\",header=F,sep=\"\t\")\n",g->config->output_filename);
+	fputs("T<-T[order(T[,ncol(T)-1]),]\n",out);
+	fprintf(out,"jpeg(\"%s.plot1.jpeg\")\n",g->config->output_filename);
+	fputs("plot(T[,ncol(T)-1],col=\"red\")\n",out);
+	fputs("points(T[,ncol(T)],col=\"green\")\n",out);
+	fputs("dev.off()\n",out);
+	fflush(out);
+	fclose(out);
+	
+	SAFE_FOPEN(".mk");
+	fprintf(out,".PHONY=all\nOUTPUT=%s\n",g->config->output_filename);
+	fprintf(out,"all:${OUTPUT}.png ${OUTPUT}.plot1.jpeg\n");
+	fprintf(out,"${OUTPUT}.png: ${OUTPUT}.dot\n\tdot -Tpng -o$@ $<\n");
+	fprintf(out,"${OUTPUT}.plot1.jpeg: ${OUTPUT}.R ${OUTPUT}.tsv\n\tR --no-save < $<\n");
+	fflush(out);
+	fclose(out);
+
+	free(fname);
+	}
+
 static void doWork(ConfigPtr config)
 	{
 	GenerationPtr gen=NULL;
@@ -944,11 +1054,25 @@ static void doWork(ConfigPtr config)
 				}
 			}
 				
-		while( GenerationCount(gen1) > config->min_genomes_per_generation ||
-			(config->massive_extinction_every!=-1L && config->curr_generations % config->massive_extinction_every==0 &&  GenerationCount(gen1) >0 ))
+		while( GenerationCount(gen1) > config->min_genomes_per_generation )
 			{
 			GenomeFree( gen1->genomes[ GenerationCount(gen1) -1 ] );
 			gen1->genome_count--;
+			}
+		
+		
+		if(config->massive_extinction_every!=-1L &&
+			config->curr_generations > 1 &&
+			config->curr_generations % config->massive_extinction_every==0 &&
+			(best==NULL || best->fitness > config->massive_extinction_if_fitness_gt)
+			)
+			{
+			fprintf(stderr,"MASSIVE EXTINCTION...\n");
+			while( GenerationCount(gen1) > 0 )
+				{
+				GenomeFree( gen1->genomes[ GenerationCount(gen1) -1 ] );
+				gen1->genome_count--;
+				}
 			}
 		
 
@@ -962,8 +1086,12 @@ static void doWork(ConfigPtr config)
 				{
 				GenomeFree(best);
 				best=GenomeClone( GenerationAt(gen1,0) );
-
+				
 				GenomePrint(best,stdout);
+				if(config->output_filename!=NULL)
+					{
+					GenomeSave(best);
+					}
 				if(best->fitness < config->min_fitness)
 					{
 					fprintf(stderr,"min fitness reached\n");
@@ -1003,10 +1131,11 @@ int main(int argc,char** argv)
 	config.best_will_survive=0;
 	config.enable_self_self=0;
 	config.normalize_data=0;
-	config.massive_extinction_every= -1L;
+	config.massive_extinction_every= 1000L;
+	config.massive_extinction_if_fitness_gt=1.0;
 	config.sort_on_genome_size=0;
 	config.remove_clone=0;
-	
+	config.output_filename=NULL;
 	config.min_fitness = 1E-6;
 	config.startup=time(NULL);
 	config.operators = OperatorsListNew();
@@ -1038,16 +1167,21 @@ int main(int argc,char** argv)
 		       {"max-bases",    required_argument, 0, 'B'},
 		       {"min-genomes",    required_argument, 0, 'n'},
 		       {"max-genomes",    required_argument, 0, 'N'},
-		     
+		       {"output",    required_argument, 0, 'o'},
 		       {0, 0, 0, 0}
 		     };
 		 /* getopt_long stores the option index here. */
 		int option_index = 0;
-	     	int c = getopt_long (argc, argv, "g:s:b:B:n:N:",
+	     	int c = getopt_long (argc, argv, "g:s:b:B:n:N:o:",
 		                    long_options, &option_index);
 		if(c==-1) break;
 		switch(c)
 			{
+			case 'o':
+				{
+				config.output_filename=optarg;
+				break;
+				}
 			case 's':
 				{
 				config.seedp=atoi(optarg);

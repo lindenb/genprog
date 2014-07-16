@@ -8,7 +8,7 @@ genprog : genprog.c genprog.h
 	$(CC) $(CFLAGS) -o $@ $< -lm
 
 test : genprog test.tsv
-	 ./genprog --min-bases 3 --max-bases 20 --min-genomes 3 --max-genomes 50 test.tsv
+	 ./genprog --min-bases 3 --max-bases 20 --min-genomes 3 --max-genomes 50  --output test.result test.tsv
 
 test.tsv: 
 	tr "\0" "\n" < /dev/zero | head -n 3000 | awk '{printf("%f\n",rand());}' |\
